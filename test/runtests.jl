@@ -1,5 +1,16 @@
-using Postgres
-using Base.Test
+module PostgresTest
 
-# write your own tests here
-@test 1 == 1
+using Postgres
+using FactCheck
+
+facts("Postgres Initialisation") do
+	context("Setup") do
+		options = Dict{ByteString, ByteString}()
+		options["user"] = "postgres"
+
+		conn = pg_connect()
+		msg = Postgres.pg_msg(:start, options)
+		Postgres.writemsg(conn, msg)
+	end
+end
+end
