@@ -1,50 +1,56 @@
 using Compat
 
-import Base: length
+import Base: length, write, read
 
 const PROTOCOL_VERSION = uint32(0x0003_0000)
 const CANCEL_CODE      = uint32(0x04d2_162e)
 const SSL_CODE         = uint32(0x04d2_162f)
 
-write_be(conn, x) = write(conn, hton(x))
+write_be(io, x) = write(io, hton(x))
+read_be(io, T) = ntoh(read(io, T))
 
 immutable MSG{I}
-  data :: Vector{UInt8}
+  data :: IOBuffer
 
-  MSG() = new(Array(UInt8,0))
-  MSG(data) = new(data)
+  MSG() = new(PipeBuffer())
+  MSG(data :: IOBuffer) = new(data)
 end
 
-MSG{I}( :: MSG{I}, data) = MSG{I}(data)
-
-length(msg :: MSG) = length(data(msg))
+# Definition taken from
+# https://github.com/JuliaLang/julia/blob/04893a165aed19d898a9ed2f9dc2202553906256/base/iobuffer.jl#L106
+function length(msg :: MSG)
+  io = data(msg)
+  (io.seekable ? io.size : nb_available(io))
+end
 data(msg :: MSG) = msg.data
 ident{I}(:: MSG{I}) = I
+
+write(m :: MSG, x) = write(data(m), x)
+read(m :: MSG, x) = read(data(m), x)
 
 pg_msg(i :: Symbol, args...) = pg_msg(MSG{i}(), args...)
 pg_msg(i :: MSG, args...) = error("Could not construct message for ident: $(ident(i))")
 
 function pg_msg(msg :: MSG{:start}, options :: Dict{ByteString, ByteString}, version = PROTOCOL_VERSION)
-  out = PipeBuffer()
-
-  write_be(out, version)
+  write_be(msg, version)
 
   for (key, value) in options
-    write(out, key)
-    write(out, '\0')
-    write(out, value)
-    write(out, '\0')
+    write(msg, key)
+    write(msg, '\0')
+    write(msg, value)
+    write(msg, '\0')
   end
 
-  write(out, '\0')
-  MSG(msg, takebuf_array(out))
+  write(msg, '\0')
+  msg
 end
 
 
 function writemsg(conn, msg :: MSG)
   out = PipeBuffer()
-  if ident(msg) != :start
-    # Write ident char
+  id = ident(msg)
+  if id != :start
+    write(out, id)
   end
 
   write_be(out, int32(length(msg) + sizeof(Int32))) # Length - big endian
