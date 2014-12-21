@@ -2,7 +2,7 @@ using GnuTLS
 
 const DEFAULT_PORT = 5432
 
-function pg_connect(host = "localhost", port = DEFAULT_PORT, require_ssl=false)
+function pg_connect(host = "localhost", port = DEFAULT_PORT; require_ssl=false)
   base_conn = connect(host, port)
 
   #Check for ssl
