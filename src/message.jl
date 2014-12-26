@@ -230,7 +230,7 @@ parsemsg(msg :: MSG{symbol('1')}) = (:ParseComplete, )
 parsemsg(msg :: MSG{:s}) = :PortalSuspended
 
 function parsemsg(msg :: MSG{:Z})
-  status = read(msg, UInt8)
+  status = read(msg, Char)
   :ReadyForQuery, status
 end
 
