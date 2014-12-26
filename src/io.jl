@@ -1,5 +1,3 @@
-using GnuTLS
-
 const DEFAULT_PORT = 5432
 
 function pg_connect(host = "localhost", port = DEFAULT_PORT; require_ssl=false)
@@ -25,11 +23,12 @@ function pg_connect(host = "localhost", port = DEFAULT_PORT; require_ssl=false)
     debug("SSL connection successfully initialised")
     return sess # Use secure connection
   elseif response == 'E'
-    error("Don't know how to handle error")
-    #todo handle error
+    # Code duplication from message.jl
+    l = read_be(conn, Int32) - sizeof(Int32)
+    data = IOBuffer(read(conn, UInt8, l))
+    DBError(MSG{:E}(data))
   else
-    error("Nonsense: $response")
-    # todo nonsense
+    error("Nonsense: $response in pg_connect")
   end
 end
 

@@ -12,7 +12,7 @@ facts("Postgres Initialisation") do
 		msg = Postgres.pg_msg(:start, options)
 		Postgres.writemsg(conn, msg)
 		rmsg = Postgres.readmsg(conn)
-		@fact Postgres.parsemsg(rmsg) => :AuthenticationOK
+		@fact Postgres.parsemsg(rmsg) => (:AuthenticationOK, )
 	end
 end
 end

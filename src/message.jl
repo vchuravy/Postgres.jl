@@ -1,6 +1,4 @@
-using Compat
-
-import Base: length, write, read
+import Base: length, write, read, readall, readuntil, readbytes
 
 const PROTOCOL_VERSION = uint32(0x0003_0000)
 const CANCEL_CODE      = uint32(0x04d2_162e)
@@ -27,6 +25,12 @@ ident{I}(:: MSG{I}) = I
 
 write(m :: MSG, x) = write(data(m), x)
 read(m :: MSG, x) = read(data(m), x)
+read(m :: MSG, x, l) = read(data(m), x, l)
+readall(m :: MSG) = readall(data(m))
+readuntil(m :: MSG, c) = readuntil(data(m), c)
+readbytes(m :: MSG) = readbytes(data(m))
+
+readstring(m :: MSG) = readuntil(m, '\0')[1:end-1]
 
 pg_msg(i :: Symbol, args...) = pg_msg(MSG{i}(), args...)
 pg_msg(i :: MSG, args...) = error("Could not construct message for ident: $(ident(i))")
@@ -77,102 +81,175 @@ function parsemsg(msg :: MSG)
 end
 
 function parsemsg(msg :: MSG{:R})
-    request = read_be(msg, Int32)
+  request = read_be(msg, Int32)
 
-    if request == 0
-      return :AuthenticationOK
-    else
-      error("Does not support this AuthenticationRequest $request")
-    end
+  if request == 0
+    return (:AuthenticationOK, )
+  elseif request == 2
+    return (:AuthenticationKerberosV5, )
+  elseif request == 3
+    return (:AuthenticationClearTextPassword, )
+  elseif request == 5
+    salt = read(msg, UInt8, 4)
+    return (:AuthenticationMD5Password, salt)
+  elseif request == 6
+    return (:AuthenticationSCMCredential, )
+  elseif request == 7
+    return (:AuthenticationGSS, )
+  elseif request == 9
+    return (:AuthenticationSSPI, )
+  elseif request == 8
+    data = read(msg, UInt8, length(msg))
+    return (:AuthenticationGSSContinue, data)
+  else
+    error("Does not support AuthenticationRequest $request")
+  end
 end
 
 function parsemsg(msg :: MSG{:K})
-  error("Can't parse BackendKeyData msg")
+  id  = read_be(msg, Int32)
+  key = read_be(msg, Int32)
+  :BackendKeyData, id, key
 end
 
 #TODO does this work
-function parsemsg(msg :: MSG{symbol('2')})
-  error("Can't parse BindComplete msg")
-end
+parsemsg(:: MSG{symbol('2')}) = (:BindComplete, )
 
 #TODO does this work
-function parsemsg(msg :: MSG{symbol('3')})
-  error("Can't parse CloseComplete msg")
-end
+parsemsg(:: MSG{symbol('3')}) = (:CloseComplete, )
 
-function parsemsg(msg :: MSG{:C})
-  error("Can't parse CommandComplete msg")
-end
+parsemsg(msg :: MSG{:C}) = (:CommandComplete, readstring(msg))
 
 function parsemsg(msg :: MSG{:d})
-  error("Can't parse CopyData msg")
+  payload = read(msg, UInt8, length(msg))
+
+  :CopyData, payload
 end
 
-function parsemsg(msg :: MSG{:c})
-  error("Can't parse CopyDone msg")
-end
+parsemsg(msg :: MSG{:c}) = (:CopyDone, )
 
 function parsemsg(msg :: MSG{:G})
-  error("Can't parse CopyInResponse msg")
+  format = read_be(msg, Int8) == 0 ? :textual : :binary
+  n = read_be(msg, Int16)
+  columns = Array(Int16, n)
+  for i in 1:n
+    columns[i] = read_be(msg, Int16)
+  end
+
+  :CopyInResponse, format, columns
 end
 
 function parsemsg(msg :: MSG{:H})
-  error("Can't parse CopyOutResponse msg")
+  format = read_be(msg, Int8) == 0 ? :textual : :binary
+  n = read_be(msg, Int16)
+  columns = Array(Int16, n)
+  for i in 1:n
+    columns[i] = read_be(msg, Int16)
+  end
+
+  :CopyOutResponse, format, columns
 end
 
 function parsemsg(msg :: MSG{:W})
-  error("Can't parse CopyBothResponse msg")
+  format = read_be(msg, Int8) == 0 ? :textual : :binary
+  n = read_be(msg, Int16)
+  columns = Array(Int16, n)
+  for i in 1:n
+    columns[i] = read_be(msg, Int16)
+  end
+
+  :CopyBothResponse, format, columns
 end
 
 function parsemsg(msg :: MSG{:D})
-  error("Can't parse DataRow msg")
+  n = read_be(msg, Int16)
+  columns = Array(Nullable{Vector{UInt8}}, n)
+
+  for i in 1:n
+    c = read_be(msg, Int32)
+
+    if c == -1
+      val = Nullable{Vector{UInt8}}()
+    else
+      val = Nullable(read(msg, UInt8, c))
+    end
+
+    columns[i] = val
+  end
+
+  :DataRow, columns
 end
 
-function parsemsg(msg :: MSG{:I})
-  error("Can't parse EmptyQueryResponse msg")
-end
+parsemsg(msg :: MSG{:I}) = (:EmptyQueryResponse, )
 
-function parsemsg(msg :: MSG{:E})
-  error("Can't parse Error msg")
-end
+parsemsg(msg :: MSG{:E}) = (:ErrorResponse, DBError(msg))
 
 function parsemsg(msg :: MSG{:V})
-  error("Can't parse FunctionCallResponse msg")
+  lr = read_be(msg, Int32)
+  if lr == -1
+    val = Nullable{Vector{UInt8}}()
+  else
+    val = Nullable(read(msg, UInt8, lr))
+  end
+
+  :FunctionCallResponse, val
 end
 
-function parsemsg(msg :: MSG{:n})
-  error("Can't parse NoData msg")
-end
+parsemsg(msg :: MSG{:n}) = (:NoData, )
 
-function parsemsg(msg :: MSG{:N})
-  error("Can't parse NoticeResponse msg")
-end
+parsemsg(msg :: MSG{:N}) = (:NoticeResponse, DBError(msg))
 
 function parsemsg(msg :: MSG{:A})
-  error("Can't parse NotificationResponse msg")
+  id = read_be(msg, Int32)
+  name = readstring(msg)
+  payload = readstring(msg)
+
+  :NotificationResponse, id, name, payload
 end
 
 function parsemsg(msg :: MSG{:t})
-  error("Can't parse ParameterDescription msg")
+  n = read_be(msg, Int16)
+  params = Array(Int32, n)
+  for i in 1:n
+    params[i] = read_be(msg, Int32)
+  end
+
+  :ParameterDescription, params
 end
 
 function parsemsg(msg :: MSG{:S})
-  error("Can't parse ParameterStatus msg")
+  name = readstring(msg)
+  value = readstring(msg)
+
+  :ParameterStatus, name, value
 end
 
 #TODO: Does this work
-function parsemsg(msg :: MSG{symbol('1')})
-  error("Can't parse ParseComplete msg")
-end
+parsemsg(msg :: MSG{symbol('1')}) = (:ParseComplete, )
 
-function parsemsg(msg :: MSG{:s})
-  error("Can't parse PortalSuspended msg")
-end
+parsemsg(msg :: MSG{:s}) = :PortalSuspended
 
 function parsemsg(msg :: MSG{:Z})
-  error("Can't parse ReadyForQuery msg")
+  status = read(msg, UInt8)
+  :ReadyForQuery, status
 end
 
 function parsemsg(msg :: MSG{:B})
-  error("Can't parse RowDescription msg")
+  n = read_be(msg, Int16)
+  fields = Array{Field, n}
+
+  for i in 1:n
+    name          = readstring(msg)
+    tableID       = read_be(msg, Int32)
+    columnID      = read_be(msg, Int16)
+    datatypeID    = read_be(msg, Int32)
+    datatypeSize  = read_be(msg, Int16)
+    typeModifier  = read_be(msg, Int32)
+    format        = read_be(msg, Int16) == 0 ? :textual : :binary
+
+    fields[i] = Field{format}(name, tableID, columnID, datatypeID,
+                              datatypeSize, typeModifier)
+  end
+
+  :RowDescription, fields
 end
