@@ -1,6 +1,7 @@
 module PostgresTest
 
 using Postgres
+const pg = Postgres
 using FactCheck
 
 facts("Postgres Initialisation") do
@@ -8,11 +9,17 @@ facts("Postgres Initialisation") do
 		options = Dict{ByteString, ByteString}()
 		options["user"] = "postgres"
 
-		conn = pg_connect()
-		msg = Postgres.pg_msg(:start, options)
-		Postgres.writemsg(conn, msg)
-		rmsg = Postgres.readmsg(conn)
-		@fact Postgres.parsemsg(rmsg) => (:AuthenticationOK, )
+		conn = pg.pg_connect()
+		msg = pg.pg_msg(:start, options)
+		pg.writemsg(conn, msg)
+		rmsg = pg.readmsg(conn)
+		@fact pg.parsemsg(rmsg) => (:AuthenticationOK, )
+		close(conn)
+	end
+
+	context("PGConnection") do
+		conn = pg.PGConnection("postgres")
+		close(conn)
 	end
 end
 end
